@@ -1,12 +1,11 @@
 import logging
 import os
+import re
 
 import yaml
 
 from get_save_data import get_save_data
 from util import *
-
-
 
 
 def find_close_bracket(string):
@@ -26,26 +25,38 @@ def find_close_bracket(string):
 def load_node_data(node_data_text):
     def get_data(data):
         def get_name(outgoing):
-            return outgoing[6: outgoing.find('\n') - 1]
+            match = re.search(r'name\s*=\s*"([^"]+)"', outgoing)
+            return match.group(1) if match else ""
 
         def get_path(outgoing):
-            return outgoing.split('path={\n\t\t\t')[1].split('\n')[0].split(' ')[:-1]
+            match = re.search(r'path\s*=\s*\{([^}]+)\}', outgoing)
+            return match.group(1).split() if match else []
 
         def get_members(members):
-            return members.split('\n')[0].split(' ')[:-1]
+            return members.split('}')[0].split()
 
         def get_location(location):
-            return location.split('\n')[0]
+            return location.strip().split()[0].replace('"', '')
 
         def get_control(outgoing):
-            return outgoing.split('control={\n\t\t\t')[1].split('\n')[0].split(' ')[:-1]
+            match = re.search(r'control\s*=\s*\{([^}]+)\}', outgoing)
+            return match.group(1).split() if match else []
+            
+        def get_color(node_chunk):
+            match = re.search(r'color\s*=\s*\{([^}]+)\}', node_chunk)
+            return match.group(1).strip() if match else "100 100 100"
 
-        return list(map(get_name, data.split('outgoing={\n\t\t')[1:])), \
-               list(map(get_path, data.split('outgoing={\n\t\t')[1:])), \
+        outgoings = re.split(r'outgoing\s*=\s*\{', data)[1:]
+        members_blocks = re.split(r'members\s*=\s*\{', data)[1:]
+        location_blocks = re.split(r'location\s*=', data)[1:]
+
+        return list(map(get_name, outgoings)), \
+               list(map(get_path, outgoings)), \
                data.find('inland') >= 0, \
-               list(map(get_members, data.split('members={\n\t\t')[1:])), \
-               list(map(get_location, data.split('location=')[1:])), \
-               list(map(get_control, data.split('outgoing={\n\t\t')[1:]))
+               list(map(get_members, members_blocks)), \
+               list(map(get_location, location_blocks)), \
+               list(map(get_control, outgoings)), \
+               get_color(data)
 
     def map_ids(node_ids):
         def map_id(v):
@@ -53,7 +64,8 @@ def load_node_data(node_data_text):
                     'outgoing_nodes': list(map(lambda x: str(node_ids[x]), v[0])),
                     'outgoing_paths': v[1],
                     'outgoing_control': v[5],
-                    'members': v[3][0]
+                    'members': v[3][0] if v[3] else [],
+                    'color': v[6]
                     }
 
         return map_id
@@ -62,7 +74,8 @@ def load_node_data(node_data_text):
     node_ids = {}
     next_pos = node_data_text.find('{')
     while next_pos >= 0:
-        node_name = node_data_text[:next_pos - 1]
+        # Fixed to safely grab the node name before the bracket
+        node_name = node_data_text[:next_pos].split()[-1].split('=')[0].strip()
         node_data_text = node_data_text[next_pos + 1:]
         close_pos = find_close_bracket(node_data_text)
         data = node_data_text[: close_pos]
