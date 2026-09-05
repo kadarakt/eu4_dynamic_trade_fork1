@@ -1,5 +1,12 @@
 # eu4_dynamic_trade (beta)
 
+I have changed a few things about this awesome project (it was all vibecoded with gemini, i don't know how to code). Hopefully it is easier to setup than the original (i had a lot of trouble there personally). The 3 major changes are:
+1. Trade flows from weaker nodes to stronger ones
+2. End nodes must be 4 nodes apart
+3. Inland nodes are 20% weaker than coastal ones
+
+   Original text below
+   
 A program to generate trade node mod for Europa Universalis 4.
 
 1. It reads the base 00_tradenodes.exe to extract trade node data
