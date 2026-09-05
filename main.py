@@ -21,7 +21,6 @@ def load_settings():
 def generate_mod():
     def rank_nodes_by_countries(countries, node_data):
         all_nodes = {}
-        # order = 1
         starter = {'development_cooperative': 0, 'power_cooperative': 0,
                    'development_mercantilism_cooperative': 0, 'power_mercantilism_cooperative': 0}
         for country, country_dict in countries.items():
@@ -52,7 +51,6 @@ def generate_mod():
     def make_outgoing_restricted(node_data, node_rank, end_nodes):
         def min_with_index(iterator):
             min_index, min_value = min(enumerate(iterator), key=operator.itemgetter(1))
-            # return (n_end_nodes - min_index) + (20 - min_value) * 1000
             return (min_value + min_index * 0.01)
 
         distance = 1
@@ -61,7 +59,6 @@ def generate_mod():
             node_data[end_node]['distance'] = [0 if j == i else 1 for j in range(n_end_nodes)]
             node_data[end_node]['outgoing'] = []
         all_nodes = [[end_node] for end_node in end_nodes]
-        # all_nodes = [[] for _ in range(n_end_nodes)]
         while any([len(nodes_at_distance[i]) > 0 for i in range(n_end_nodes)]):
             for i in range(n_end_nodes):
                 logging.info(f'{distance}, {nodes_at_distance[i]}')
@@ -106,6 +103,12 @@ def generate_mod():
             v.pop('incoming_nodes')
             v.pop('incoming_paths')
             v.pop('incoming_control')
+            
+        # Forcefully ensure designated end nodes have zero outgoing paths
+        for end_node in end_nodes:
+            if end_node in node_data:
+                node_data[end_node]['outgoing'] = []
+
         return dict(sorted(node_data.items(), key=lambda x: NodeScores(2).set_scores(
             [min_with_index([(x[1]['distance'][i]) for i in range(n_end_nodes)]), node_rank[x[0]]]), reverse=True))
 
@@ -114,22 +117,36 @@ def generate_mod():
             node_connections = node_data[node]['node_connections']
             outgoings = []
             for node_connection in node_connections:
-                if node_pull(node_data, node_rank)(node, node_connection[0]):
+                target = node_connection[0]
+                if node_rank[node] < node_rank[target]:
                     outgoings.append(node_connection)
             return outgoings
 
         for k, v in node_data.items():
             v['outgoing'] = make_node_outgoing(k)
-        for v in node_data.values():
-            v.pop('node_connections')
-            v.pop('outgoing_nodes')
-            v.pop('outgoing_paths')
-            v.pop('outgoing_control')
-            v.pop('incoming_nodes')
-            v.pop('incoming_paths')
-            v.pop('incoming_control')
+            
+        # Safety pass: eliminate any accidental bidirectional loops between nodes
+        for k, v in node_data.items():
+            valid_outgoings = []
+            for outgoing in v.get('outgoing', []):
+                target = outgoing[0]
+                target_outgoings = [conn[0] for conn in node_data.get(target, {}).get('outgoing', [])]
+                if k not in target_outgoings:
+                    valid_outgoings.append(outgoing)
+                elif node_rank[k] < node_rank[target]:
+                    valid_outgoings.append(outgoing)
+            v['outgoing'] = valid_outgoings
 
-        return dict(sorted(node_data.items(), key=lambda x: node_rank[x[0]], reverse=True))
+        for v in node_data.values():
+            v.pop('node_connections', None)
+            v.pop('outgoing_nodes', None)
+            v.pop('outgoing_paths', None)
+            v.pop('outgoing_control', None)
+            v.pop('incoming_nodes', None)
+            v.pop('incoming_paths', None)
+            v.pop('incoming_control', None)
+
+        return dict(sorted(node_data.items(), key=lambda x: node_rank[x[0]], reverse=False))
 
     def node_score(node_data, node_rank, equal_threshold=1):
         def get_score(node):
@@ -173,14 +190,19 @@ def generate_mod():
                     score.scores[i] = node_data[node]['quadratic_trade_power'] / len(node_data[node]['members'])
                 if flow_power_rule == 'quadratic_average_development':
                     score.scores[i] = node_data[node]['quadratic_development'] / len(node_data[node]['members'])
-            # print(node, score)
+
+            # Apply an inland penalty so coastal nodes are favored for end nodes
+            if node_data[node].get('inland', False):
+                for i in range(len(flow_power_rules)):
+                    score.scores[i] *= 0.80  # 20% penalty factor for inland nodes
+
             return score
 
         return get_score
 
     def node_pull(node_data, node_rank):
         def compare_nodes(first, second):
-            return node_rank[first] > node_rank[second]
+            return node_rank[first] < node_rank[second]
 
         return compare_nodes
 
@@ -190,18 +212,44 @@ def generate_mod():
         if restricted == 'unrestricted':
             return make_outgoing_unrestricted
 
+    def topological_sort(data_dict):
+        visited = set()
+        stack = []
+
+        def dfs(n):
+            if n in visited:
+                return
+            visited.add(n)
+            for out_conn in data_dict.get(n, {}).get('outgoing', []):
+                dfs(out_conn[0])
+            stack.append(n)
+
+        for n in data_dict.keys():
+            dfs(n)
+            
+        return {n: data_dict[n] for n in reversed(stack)}
+
     def gen_nodes_text(node_data):
         def gen_node_text(k, v):
-            out = f'{k}=' + '{\n\tlocation=' + v['location'][0] + '\n\tinland=yes' * v['inland'] + '\n\t' \
-                  + reduce(str.__add__, ['outgoing={\n\t\tname="' + outgoing[0] \
-                                         + '"\n\t\tpath={\n\t\t\t' + ' '.join(outgoing[1]) \
-                                         + '\n\t\t}' \
-                                         + '\n\t\tcontrol={\n\t\t\t' + ' '.join(outgoing[2]) \
-                                         + '\n\t\t}' \
-                                         + '\n\t}\n\t' for outgoing in set(v['outgoing'])], '') \
-                  + 'members={\n\t\t' + ' '.join(v['members']) + '\n\t}\n' + '\tend=yes\n' * int(
-                len(v['outgoing']) == 0) + '}\n'
-
+            out = f'{k}=' + '{\n\tlocation=' + v['location'][0] + '\n\tinland=yes' * v['inland'] + '\n\t'
+            out += 'color={\n\t\t' + v.get('color', '100 100 100') + '\n\t}\n\t'
+            
+            unique_outgoings = {}
+            for outgoing in v.get('outgoing', []):
+                unique_outgoings[outgoing[0]] = outgoing
+                
+            for outgoing in unique_outgoings.values():
+                out += 'outgoing={\n\t\tname="' + outgoing[0] + '"\n\t\tpath={\n\t\t\t' + ' '.join(outgoing[1]) + '\n\t\t}\n'
+                if outgoing[2]:
+                    out += '\t\tcontrol={\n\t\t\t' + ' '.join(outgoing[2]) + '\n\t\t}\n'
+                out += '\t}\n\t'
+                
+            out += 'members={\n\t\t' + ' '.join(v['members']) + '\n\t}\n'
+            
+            # Re-added the missing AI propagation flag to prevent day-25 engine crashes
+            out += '\tai_will_propagate_through_trade=yes\n'
+            
+            out += '\tend=yes\n' * int(len(unique_outgoings) == 0) + '}\n'
             return out
 
         out = ''
@@ -223,6 +271,7 @@ def generate_mod():
     end_node_restriction = settings['flow_rules']['end_node_restriction']
     equal_threshold = settings['flow_rules']['equal_threshold']
     reload_save_data = settings['reload_save_data']
+    
     if reload_save_data:
         node_data, countries = get_node_data()
         with open('node_data.json', 'w') as f:
@@ -237,6 +286,7 @@ def generate_mod():
         for value in node_data.values():
             value['node_connections'] = tlist(
                 map(lambda x: (x[0], tuple(x[1]), tuple(x[2])), value['node_connections']))
+                
     node_rank_by_country = rank_nodes_by_countries(countries, node_data)
     node_rank = dict(sorted(zip(node_data.keys(),
                                 map(lambda x: node_score(node_data, node_rank_by_country, equal_threshold)(x),
@@ -244,17 +294,64 @@ def generate_mod():
                             key=lambda x: x[1], reverse=True))
     logging.info(
         f'top 10 nodes: \n' + '\n'.join(list(map(lambda x: f'{str(x[0])}: {str(x[1])}', node_rank.items()))[:10]))
-    end_nodes = list(node_rank.keys())[:n_end_nodes]
+        
+    # Helper function to find the shortest trade-node hop distance between two nodes
+    def get_hop_distance(start_node, target_node, graph):
+        if start_node == target_node:
+            return 0
+        visited = {start_node}
+        queue = [(start_node, 0)]
+        while queue:
+            current, dist = queue.pop(0)
+            if current == target_node:
+                return dist
+            for conn in graph.get(current, {}).get('node_connections', []):
+                neighbor = conn[0]
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, dist + 1))
+        return float('inf')
+
+    # Select top end nodes enforcing a minimum graph distance (e.g., at least 3 hops apart)
+    potential_end_nodes = list(node_rank.keys())
+    end_nodes = []
+    min_hops = 4  # Increase to 4 if you want them even further apart
+
+    for node in potential_end_nodes:
+        if len(end_nodes) >= n_end_nodes:
+            break
+        if not end_nodes:
+            end_nodes.append(node)
+            continue
+        
+        too_close = False
+        for chosen in end_nodes:
+            hops = get_hop_distance(node, chosen, node_data)
+            if hops < min_hops:
+                too_close = True
+                break
+        if not too_close:
+            end_nodes.append(node)
+
+    # Fallback: if the map graph is too dense, fill up to n_end_nodes
+    if len(end_nodes) < n_end_nodes:
+        for node in potential_end_nodes:
+            if len(end_nodes) >= n_end_nodes:
+                break
+            if node not in end_nodes:
+                end_nodes.append(node)
     node_data = make_outgoing(end_node_restriction)(node_data, node_rank, end_nodes)
+    
+    node_data = topological_sort(node_data)
     nodes_text = gen_nodes_text(node_data)
-    if not os.path.exists(os.path.join(eu4_mod_folder, node_data_folder)):
-        os.makedirs(os.path.join(eu4_mod_folder, node_data_folder))
+    
+    if not os.path.exists(os.path.join(eu4_mod_folder, mod_name, 'common/tradenodes')):
+        os.makedirs(os.path.join(eu4_mod_folder, mod_name, 'common/tradenodes'))
     with open(os.path.join(eu4_mod_folder, mod_name, 'common/tradenodes', '00_tradenodes.txt'), 'w') as f:
         f.write(nodes_text)
     with open(os.path.join(eu4_mod_folder, f'{mod_name}.mod'), 'w') as f:
         f.write(gen_mod_text(eu4_mod_folder, mod_name))
     shutil.copy('descriptor.mod', os.path.join(eu4_mod_folder, mod_name, 'descriptor.mod'))
-
 
 if __name__ == '__main__':
     generate_mod()
