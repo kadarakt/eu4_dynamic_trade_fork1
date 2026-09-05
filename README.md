@@ -1,9 +1,10 @@
 # eu4_dynamic_trade (beta)
 
-I have changed a few things about this awesome project (it was all vibecoded with gemini, i don't know how to code). Hopefully it is easier to setup than the original (i had a lot of trouble there personally). The 3 major changes are:
-1. Trade flows from weaker nodes to stronger ones
-2. End nodes must be 4 nodes apart
-3. Inland nodes are 20% weaker than coastal ones
+I have changed a few things about this awesome project (it was all vibecoded with gemini, i don't know how to code). Hopefully it is easier to setup than the original (i had a lot of trouble there personally). The 4 major changes are:
+1. entry.py now looks at all of your drives to locate your folders. If you struggle to open the program like me here is what I did: install python, go to your address bar on file explorer (something like D:\Downloads\eu4_dynamic_trade-0.8.1), click on it and type "cmd", then type "python enter.py" (both without the apostrophes) and click enter. It should open up the program and allow you to assign your folders.
+2. Trade now flows from weaker nodes to stronger ones (in the original code trade nodes flowed from the strongest to the weakest, so strong nodes would flow into the middle of nowhere where sometimes there isn't even anyone to collect the node. i couldn't figure out why this was the case in the original)
+3. End nodes must be 4 nodes apart (to prevent all end nodes from hugging each other like basegame venice genoa english channel. if you don't mind that or want them even further apart go into main.py and edit min_hops = 4 to something else like 0 or 1)
+4. Inland nodes are only 80% as strong as coastal ones (can also be quickly changed by going into main.py and adjusting score.scores[i] *= 0.80)
 
    Original text below
    
