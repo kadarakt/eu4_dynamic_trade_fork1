@@ -1,6 +1,7 @@
 import logging
 import os
 import multiprocessing
+import string
 from functools import partial
 from pathlib import Path
 from tkinter import *
@@ -39,23 +40,68 @@ def save_settings(settings):
     with open('settings.yaml', 'w') as f:
         yaml.safe_dump(settings, f)
 
-
 def get_default_paths():
-    eu4_doc_folder = next(Path('/Users').rglob('Documents/Paradox Interactive/Europa Universalis IV'))
-    if os.path.isdir(settings['file_path']['game_folder']):
-        game_folder = settings['file_path']['game_folder']
+    settings_paths = settings.get('file_path', {})
+    
+    # 1. Dynamically find the EU4 Documents folder across all drives
+    eu4_doc_folder = ''
+    saved_game_folder = settings_paths.get('game_folder', '')
+    
+    # Search common locations and available drives for the Paradox folder
+    search_bases = [Path.home() / 'Documents']
+    for letter in string.ascii_uppercase:
+        drive_root = Path(f"{letter}:/")
+        if drive_root.exists():
+            search_bases.append(drive_root / 'Documents')
+            search_bases.append(drive_root / 'Users')
+
+    for base in search_bases:
+        if base.exists():
+            try:
+                matches = list(base.rglob('Paradox Interactive/Europa Universalis IV'))
+                if matches:
+                    eu4_doc_folder = str(matches[0])
+                    break
+            except (PermissionError, OSError):
+                continue
+                
+    # Fallback if dynamic search doesn't find it immediately
+    if not eu4_doc_folder:
+        eu4_doc_folder = 'F:/Documents/Paradox Interactive/Europa Universalis IV'
+
+    # 2. Dynamically find the Steam Game folder across all drives
+    game_folder = ''
+    if saved_game_folder and os.path.isdir(saved_game_folder):
+        game_folder = saved_game_folder
     else:
-        game_folder = next(Path('/').rglob('Steam/steamapps/common/Europa Universalis IV'))
-    if os.path.isdir(settings['file_path']['eu4_mod_folder']):
-        eu4_mod_folder = settings['file_path']['eu4_mod_folder']
+        for letter in string.ascii_uppercase:
+            drive_root = Path(f"{letter}:/")
+            if drive_root.exists():
+                try:
+                    # Look for steamapps common folder efficiently
+                    matches = list(drive_root.glob('**/steamapps/common/Europa Universalis IV'))
+                    if matches:
+                        game_folder = str(matches[0])
+                        break
+                except (PermissionError, OSError):
+                    continue
+        if not game_folder:
+            game_folder = 'C:/Program Files (x86)/Steam/steamapps/common/Europa Universalis IV'
+
+    # 3. Resolve remaining paths relative to the discovered folders
+    if os.path.isdir(settings_paths.get('eu4_mod_folder', '')):
+        eu4_mod_folder = settings_paths['eu4_mod_folder']
     else:
         eu4_mod_folder = os.path.join(eu4_doc_folder, 'mod')
-    if os.path.isdir(settings['file_path']['node_data_folder']):
-        node_data_folder = settings['file_path']['node_data_folder']
+        
+    if os.path.isdir(settings_paths.get('node_data_folder', '')):
+        node_data_folder = settings_paths['node_data_folder']
     else:
         node_data_folder = os.path.join(game_folder, 'common/tradenodes')
+        
     mod_name = 'dynamic_trade'
     save_dir = os.path.join(eu4_doc_folder, 'save games')
+    
     return game_folder, eu4_mod_folder, save_dir, mod_name, node_data_folder
 
 
